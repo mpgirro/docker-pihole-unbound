@@ -39,7 +39,7 @@ jobs:
 
       # Set up QEMU to enable multi-platform builds
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3.2.0
+        uses: docker/setup-qemu-action@v3.3.0
 
       # Login against a Docker registry except on PR
       # https://github.com/docker/login-action
