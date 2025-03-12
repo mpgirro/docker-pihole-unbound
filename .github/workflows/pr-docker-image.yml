@@ -1,0 +1,48 @@
+name: Publish Docker Image for PR
+
+on:
+    workflow_dispatch:  # Manual trigger
+    pull_request:
+
+jobs:
+  build-and-push-pr-image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3.3.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3.8.0
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3.3.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Pihole version from Dockerfile
+        id: extract-version
+        run: |
+          VERSION=$(grep -oP '(?<=pihole/pihole:)\S+' docker/Dockerfile)
+          echo "Extracted pihole version is: $VERSION"
+          echo "PIHOLE_VERSION=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push PR Docker image
+        uses: docker/build-push-action@v6.12.0
+        with:
+          context: docker/
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/docker-pihole-unbound:pr${{ github.event.number }}-${{ github.run_number }}-${{ github.sha }}
+          platforms: linux/amd64,linux/386,linux/arm/v6,linux/arm/v7,linux/arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
