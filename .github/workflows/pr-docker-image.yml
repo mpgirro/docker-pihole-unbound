@@ -37,7 +37,7 @@ jobs:
           echo "PIHOLE_VERSION=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Build and push PR Docker image
-        uses: docker/build-push-action@v6.16.0
+        uses: docker/build-push-action@v6.18.0
         with:
           context: docker/
           push: true
