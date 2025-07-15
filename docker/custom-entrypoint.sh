@@ -6,7 +6,7 @@ chown pihole:pihole /var/log/unbound
 
 # Start Unbound with error checking
 echo "  [i] Starting Unbound"
-/usr/sbin/unbound -d -c /etc/unbound/unbound.conf.d/pi-hole.conf &
+/usr/sbin/unbound -d -c /etc/unbound/unbound.conf &
 UNBOUND_PID=$!
 
 # Wait briefly and check if Unbound started successfully
