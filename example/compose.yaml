@@ -9,7 +9,7 @@ services:
       - 443:443/tcp
       - 53:53/tcp
       - 53:53/udp
-      - ${PIHOLE_WEBPORT:-80}:80/tcp #Allows use of different port to access pihole web interface when other docker containers use port 80
+      - ${PIHOLE_WEBPORT:-80}:${PIHOLE_WEBPORT:-80}/tcp #Allows use of different port to access pihole web interface when other docker containers use port 80
       # - 5335:5335/tcp # Uncomment to enable unbound access on local server
       # - 22/tcp # Uncomment to enable SSH
     environment:
