@@ -1,8 +1,8 @@
 #!/bin/sh
 
-# Ensure Unbound log directory exists
+# Ensure Unbound log directory exists and has appropriate ownership
 mkdir -p /var/log/unbound
-chown pihole:pihole /var/log/unbound
+chown unbound /var/log/unbound
 
 # Start Unbound with error checking
 echo "  [i] Starting Unbound"
