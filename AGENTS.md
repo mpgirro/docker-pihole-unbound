@@ -81,3 +81,5 @@ gh api -X PUT "repos/:owner/:repo/rulesets/${RULESET_ID}" \
 ```
 
 Scope of auto-merge: only `pihole/pihole` Docker tag bumps are auto-merged. All other Renovate-managed dependencies default to `automerge: false` and require manual review.
+
+Note: classic branch protection on `main` was intentionally removed in favor of this committed ruleset. Do **not** re-enable classic branch protection — its `required_approving_review_count: 1` clashes with the solo-maintainer model (GitHub forbids self-approval) and deadlocks every PR. The ruleset alone enforces no-deletion, no-force-push, PR-required, and the two required checks.
