@@ -13,6 +13,7 @@ Drop-in self-hosted Pi-hole + Unbound DNS image for home/SOHO users. Maintained 
 
 - `docker/` — `Dockerfile`, `custom-entrypoint.sh`, Unbound + lighttpd + dnsmasq configs
 - `example/compose.yaml` — reference Docker Compose for end users
+- `test/smoke-test.sh` — release smoke test (boot, recursive DNS, DNSSEC, admin UI)
 - `.github/workflows/` — `docker-publish.yml` (main) and `pr-docker-image.yml` (PRs)
 
 ## Commands
@@ -39,10 +40,44 @@ dig @127.0.0.1 -p 53 example.com                      # Verify DNS resolution
 
 ## Testing
 
-No automated test suite. Verify changes by:
+Automated smoke test: `test/smoke-test.sh <image-ref>` boots the image, waits for readiness, and asserts:
 
-1. `docker build docker/` succeeds locally.
-2. Bring up `example/compose.yaml`; `dig @127.0.0.1 -p 53 example.com` returns an answer.
-3. Pi-hole admin UI loads on the configured port.
+1. Container in `running` state, no fatal markers in logs.
+2. Unbound listens on `127.0.0.1:5335` inside the container.
+3. Recursive resolution: `dig @127.0.0.1 example.com` and `cloudflare.com` return `NOERROR` with answers.
+4. DNSSEC validating: `dig +dnssec cloudflare.com` returns the `ad` flag.
+5. DNSSEC enforcing: `dnssec-failed.org` returns `SERVFAIL`.
+6. Admin UI at `/admin/` responds 2xx/3xx.
 
-`pr-docker-image.yml` runs multi-arch builds as a final gate; a green PR build is necessary but not sufficient.
+Local run:
+
+```bash
+docker build -t pihole-smoke docker/
+./test/smoke-test.sh pihole-smoke
+```
+
+In CI, `pr-docker-image.yml` runs the script against the just-built PR image (job `smoke-test (amd64)`) after the multi-arch build. Renovate auto-merge for `pihole/pihole` bumps must wait on this check.
+
+## CI gates
+
+`main` is protected via a GitHub Repository Ruleset committed to the repo at `.github/rulesets/main.json`. It requires two status checks before any merge — including Renovate auto-merge of `pihole/pihole` bumps:
+
+- `build-and-push-pr-image` — multi-arch build succeeds.
+- `smoke-test (amd64)` — runtime smoke test passes.
+
+Renovate uses GitHub's native auto-merge (`"platformAutomerge": true` on the `pihole/pihole` rule in `renovate.json`), so a failing smoke test hard-blocks the merge instead of merely delaying Renovate's polling.
+
+Apply / update the ruleset (one-shot, then on every edit to the JSON):
+
+```bash
+# First-time apply
+gh api -X POST repos/:owner/:repo/rulesets \
+  --input .github/rulesets/main.json
+
+# Update after editing the JSON
+RULESET_ID=$(gh api repos/:owner/:repo/rulesets --jq '.[] | select(.name=="main-branch-protection") | .id')
+gh api -X PUT "repos/:owner/:repo/rulesets/${RULESET_ID}" \
+  --input .github/rulesets/main.json
+```
+
+Scope of auto-merge: only `pihole/pihole` Docker tag bumps are auto-merged. All other Renovate-managed dependencies default to `automerge: false` and require manual review.

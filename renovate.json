@@ -21,7 +21,8 @@
       "matchDatasources": ["docker"],
       "separateMultipleMinor": true,
       "separateMinorPatch": true,
-      "automerge": true
+      "automerge": true,
+      "platformAutomerge": true
     }
   ]
 }
