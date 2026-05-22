@@ -36,13 +36,50 @@ jobs:
           echo "Extracted pihole version is: $VERSION"
           echo "PIHOLE_VERSION=$VERSION" >> "$GITHUB_OUTPUT"
 
+      - name: Compute image ref
+        id: image
+        run: |
+          OWNER=$(printf '%s' "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "ref=ghcr.io/${OWNER}/docker-pihole-unbound:pr${{ github.event.number }}-${{ github.run_number }}-${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
       - name: Build and push PR Docker image
         uses: docker/build-push-action@v6.19.2
         with:
           context: docker/
           push: true
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/docker-pihole-unbound:pr${{ github.event.number }}-${{ github.run_number }}-${{ github.sha }}
+          tags: ${{ steps.image.outputs.ref }}
           platforms: linux/amd64,linux/386,linux/arm/v6,linux/arm/v7,linux/arm64
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+    outputs:
+      image: ${{ steps.image.outputs.ref }}
+
+  smoke-test:
+    name: smoke-test (amd64)
+    needs: build-and-push-pr-image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install dig
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends dnsutils
+
+      - name: Pull PR image
+        run: docker pull "${{ needs.build-and-push-pr-image.outputs.image }}"
+
+      - name: Run smoke test
+        run: ./test/smoke-test.sh "${{ needs.build-and-push-pr-image.outputs.image }}"
