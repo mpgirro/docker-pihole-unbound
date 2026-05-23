@@ -43,7 +43,7 @@ jobs:
           echo "ref=ghcr.io/${OWNER}/docker-pihole-unbound:pr${{ github.event.number }}-${{ github.run_number }}-${{ github.sha }}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push PR Docker image
-        uses: docker/build-push-action@v6.19.2
+        uses: docker/build-push-action@v7.2.0
         with:
           context: docker/
           push: true
