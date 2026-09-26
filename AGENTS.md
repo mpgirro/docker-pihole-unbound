@@ -27,7 +27,7 @@ dig @127.0.0.1 -p 53 example.com                      # Verify DNS resolution
 
 ## Gotchas
 
-- **Publish workflow path filter**: `.github/workflows/docker-publish.yml` triggers only on changes to `docker/Dockerfile`. Edits to `custom-entrypoint.sh`, `unbound-pihole.conf`, `lighttpd-external.conf`, or `99-edns.conf` will NOT publish a new image until the next Dockerfile bump. Warn the user when editing those files. Never widen the path filter without explicit approval; instead flag the situation and let the user decide.
+- **Publish workflow path filter**: `.github/workflows/docker-publish.yml` triggers on changes to `docker/Dockerfile`, plus a weekly schedule that publishes only when the Unbound package changed ([ADR 0001](docs/adr/0001-weekly-scheduled-rebuild-tracks-unbound-unpinned.md)). Edits to `custom-entrypoint.sh`, `unbound-pihole.conf`, `lighttpd-external.conf`, or `99-edns.conf` will NOT publish a new image until the next Dockerfile bump. Warn the user when editing those files. Never widen the path filter without explicit approval; instead flag the situation and let the user decide.
 - **`docker/unbound-pihole.conf` mirrors the upstream Pi-hole guide** (https://docs.pi-hole.net/guides/unbound/). Treat it as a near-verbatim copy. Do not restructure or "optimize" it; only deviate when the user requests a specific change with a stated reason.
 
 ## Out of Scope
