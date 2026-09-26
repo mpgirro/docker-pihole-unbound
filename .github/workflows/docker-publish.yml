@@ -10,6 +10,11 @@ on:
     branches: [ "main" ]
     paths: ["docker/Dockerfile"]
 
+# Queue publishes so a slower run cannot move latest back to an older image
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
 jobs:
   resolve:
     runs-on: ubuntu-latest
@@ -248,5 +253,6 @@ jobs:
       - uses: softprops/action-gh-release@v3.0.0
         with:
           tag_name: ${{ needs.resolve.outputs.exact-tag }}
+          target_commitish: ${{ github.sha }}
           body_path: release-notes.md
           make_latest: true
