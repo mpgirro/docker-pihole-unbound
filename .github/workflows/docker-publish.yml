@@ -2,13 +2,65 @@ name: Publish Docker Images
 
 on:
   workflow_dispatch:  # Manual trigger
+  schedule:
+    # Weekly rebuild to pick up Alpine fixes to Unbound, see docs/adr/0001
+    - cron: '0 4 * * 1'
   push:
     # Trigger on master branch only if changes are detected in the docker directory
     branches: [ "main" ]
     paths: ["docker/Dockerfile"]
 
 jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      pihole-version: ${{ steps.versions.outputs.PIHOLE_VERSION }}
+      unbound-version: ${{ steps.versions.outputs.UNBOUND_VERSION }}
+      exact-tag: ${{ steps.versions.outputs.EXACT_TAG }}
+      previous-release: ${{ steps.versions.outputs.PREVIOUS_RELEASE }}
+      publish: ${{ steps.check.outputs.PUBLISH }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Resolve Pi-hole and Unbound versions
+        id: versions
+        run: |
+          PIHOLE_VERSION=$(grep -oP '(?<=pihole/pihole:)\S+' docker/Dockerfile)
+          UNBOUND_VERSION=$(docker run --rm --entrypoint sh "pihole/pihole:${PIHOLE_VERSION}" \
+            -c 'apk update >/dev/null && apk search -x unbound' | sed 's/^unbound-//')
+          test -n "$UNBOUND_VERSION"
+          EXACT_TAG="${PIHOLE_VERSION}-unbound${UNBOUND_VERSION}"
+          # Latest earlier release of this Pi-hole version, bare or exact, if any
+          PREVIOUS_RELEASE=$(git ls-remote --tags --refs origin \
+              "refs/tags/${PIHOLE_VERSION}" "refs/tags/${PIHOLE_VERSION}-unbound*" \
+            | sed 's|.*refs/tags/||' | grep -vxF "$EXACT_TAG" | sort -V | tail -n1 || true)
+          echo "Pi-hole ${PIHOLE_VERSION}, Unbound ${UNBOUND_VERSION}, previous release: ${PREVIOUS_RELEASE:-none}"
+          {
+            echo "PIHOLE_VERSION=$PIHOLE_VERSION"
+            echo "UNBOUND_VERSION=$UNBOUND_VERSION"
+            echo "EXACT_TAG=$EXACT_TAG"
+            echo "PREVIOUS_RELEASE=$PREVIOUS_RELEASE"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Skip scheduled rebuild if exact tag exists
+        id: check
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/docker-pihole-unbound:${{ steps.versions.outputs.EXACT_TAG }}
+        run: |
+          if [ "${{ github.event_name }}" = schedule ] && docker buildx imagetools inspect "$IMAGE" >/dev/null 2>&1; then
+            echo "$IMAGE already published, skipping"
+            echo "PUBLISH=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "PUBLISH=true" >> "$GITHUB_OUTPUT"
+          fi
+
   publish-image:
+    needs: resolve
+    if: needs.resolve.outputs.publish == 'true'
 
     runs-on: ubuntu-latest
     permissions:
@@ -57,12 +109,24 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract Pihole version from Dockerfile
-        id: extract-version
+      - name: Install dig
         run: |
-          VERSION=$(grep -oP '(?<=pihole/pihole:)\S+' docker/Dockerfile)
-          echo "Extracted pihole version is: $VERSION"
-          echo "PIHOLE_VERSION=$VERSION" >> "$GITHUB_OUTPUT"
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends dnsutils
+
+      # Gate every publish on the smoke test: a scheduled rebuild reaches latest without a PR
+      - name: Build amd64 image for smoke test
+        uses: docker/build-push-action@v7.2.0
+        with:
+          context: docker/
+          load: true
+          tags: pihole-unbound:smoke
+          platforms: linux/amd64
+          build-args: UNBOUND_VERSION=${{ needs.resolve.outputs.unbound-version }}
+          cache-from: type=gha
+
+      - name: Run smoke test
+        run: ./test/smoke-test.sh pihole-unbound:smoke
 
       # Extract metadata (tags, labels) for Docker
       # https://github.com/docker/metadata-action
@@ -77,7 +141,8 @@ jobs:
             ghcr.io/${{ github.repository_owner }}/docker-pihole-unbound    
           # Generate Docker tags based on the following events/attributes
           tags: |
-            type=raw,value=${{ steps.extract-version.outputs.PIHOLE_VERSION }}
+            type=raw,value=${{ needs.resolve.outputs.pihole-version }}
+            type=raw,value=${{ needs.resolve.outputs.exact-tag }}
             type=raw,value=latest
           # Set the OCI Image Specification source label to the base image repository, to enable tools 
           # like Renovate and Dependabot to automatically fetch release notes for new versions.
@@ -95,6 +160,7 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: UNBOUND_VERSION=${{ needs.resolve.outputs.unbound-version }}
           platforms: linux/amd64,linux/386,linux/arm/v6,linux/arm/v7,linux/arm64
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -114,52 +180,73 @@ jobs:
         # against the sigstore community Fulcio instance.
         run: echo "${TAGS}" | xargs -I {} cosign sign --yes {}@${DIGEST}
 
+      - name: Write release notes
+        env:
+          PIHOLE_VERSION: ${{ needs.resolve.outputs.pihole-version }}
+          UNBOUND_VERSION: ${{ needs.resolve.outputs.unbound-version }}
+          EXACT_TAG: ${{ needs.resolve.outputs.exact-tag }}
+          PREVIOUS_RELEASE: ${{ needs.resolve.outputs.previous-release }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          if [ -n "$PREVIOUS_RELEASE" ]; then
+            SUMMARY="Rebuild of Pi-hole \`${PIHOLE_VERSION}\` with Unbound \`${UNBOUND_VERSION}\`"
+            case "$PREVIOUS_RELEASE" in
+              *-unbound*) SUMMARY="${SUMMARY} (was \`${PREVIOUS_RELEASE#*-unbound}\`)" ;;
+            esac
+            CHANGES="- Rebuilt with Unbound \`${UNBOUND_VERSION}\` from Alpine"
+          else
+            SUMMARY="This release updates the Pi-hole + Unbound Docker image to the latest Pi-hole version."
+            CHANGES="- Updated Pi-hole base image to [\`${PIHOLE_VERSION}\`](https://github.com/pi-hole/docker-pi-hole/releases/tag/${PIHOLE_VERSION})
+          - Unbound \`${UNBOUND_VERSION}\` from Alpine"
+          fi
+          cat > release-notes.md <<EOF
+          # Pi-hole + Unbound ${EXACT_TAG}
+
+          ${SUMMARY}
+
+          ## What's Changed
+
+          ${CHANGES}
+          - All multi-architecture support: linux/amd64, linux/386, linux/arm/v6, linux/arm/v7, linux/arm64
+
+          ## Available From
+
+          The image is available from multiple registries. \`${PIHOLE_VERSION}\` and \`latest\` follow rebuilds; \`${EXACT_TAG}\` always names this exact image.
+
+          - **Docker Hub**:
+            \`\`\`
+            docker pull mpgirro/pihole-unbound:${PIHOLE_VERSION}
+            docker pull mpgirro/docker-pihole-unbound:${PIHOLE_VERSION}
+            \`\`\`
+
+          - **GitHub Container Registry**:
+            \`\`\`
+            docker pull ghcr.io/${OWNER}/docker-pihole-unbound:${PIHOLE_VERSION}
+            \`\`\`
+
+          ## Verification
+
+          All images are signed with [Sigstore Cosign](https://github.com/sigstore/cosign) for enhanced security.
+
+          ## Update Instructions
+
+          ### Docker Compose
+          \`\`\`yaml
+          services:
+            pihole:
+              image: mpgirro/pihole-unbound:${PIHOLE_VERSION}
+              # ...rest of your configuration...
+          \`\`\`
+
+          ### Docker CLI
+          \`\`\`shell
+          docker pull mpgirro/pihole-unbound:${PIHOLE_VERSION}
+          docker run -d --name pihole-unbound mpgirro/pihole-unbound:${PIHOLE_VERSION}
+          \`\`\`
+          EOF
+
       - uses: softprops/action-gh-release@v3.0.0
         with:
-          tag_name: ${{ steps.extract-version.outputs.PIHOLE_VERSION }}
-          body: |
-            # Pi-hole + Unbound ${{ steps.extract-version.outputs.PIHOLE_VERSION }}
-
-            This release updates the Pi-hole + Unbound Docker image to the latest Pi-hole version.
-
-            ## What's Changed
-
-            - Updated Pi-hole base image to [`${{ steps.extract-version.outputs.PIHOLE_VERSION }}`](https://github.com/pi-hole/docker-pi-hole/releases/tag/${{ steps.extract-version.outputs.PIHOLE_VERSION }})
-            - Maintained Unbound DNS resolver integration with latest Pi-hole version
-            - All multi-architecture support: linux/amd64, linux/386, linux/arm/v6, linux/arm/v7, linux/arm64
-
-            ## Available From
-
-            The image is available from multiple registries:
-
-            - **Docker Hub**: 
-              ```
-              docker pull mpgirro/pihole-unbound:${{ steps.extract-version.outputs.PIHOLE_VERSION }}
-              docker pull mpgirro/docker-pihole-unbound:${{ steps.extract-version.outputs.PIHOLE_VERSION }}
-              ```
-
-            - **GitHub Container Registry**:
-              ```
-              docker pull ghcr.io/${{ github.repository_owner }}/docker-pihole-unbound:${{ steps.extract-version.outputs.PIHOLE_VERSION }}
-              ```
-
-            ## Verification
-
-            All images are signed with [Sigstore Cosign](https://github.com/sigstore/cosign) for enhanced security.
-
-            ## Update Instructions
-
-            ### Docker Compose
-            ```yaml
-            services:
-              pihole:
-                image: mpgirro/pihole-unbound:${{ steps.extract-version.outputs.PIHOLE_VERSION }}
-                # ...rest of your configuration...
-            ```
-
-            ### Docker CLI
-            ```shell
-            docker pull mpgirro/pihole-unbound:${{ steps.extract-version.outputs.PIHOLE_VERSION }}
-            docker run -d --name pihole-unbound mpgirro/pihole-unbound:${{ steps.extract-version.outputs.PIHOLE_VERSION }}
-            ```
+          tag_name: ${{ needs.resolve.outputs.exact-tag }}
+          body_path: release-notes.md
           make_latest: true

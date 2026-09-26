@@ -63,6 +63,7 @@ if [ "$ready" -ne 1 ]; then
   exit 1
 fi
 log "ready"
+log "$(docker exec "$NAME" unbound -V 2>&1 | sed -n 1p)"
 
 # 1. Container still running
 status=$(docker inspect -f '{{.State.Status}}' "$NAME" 2>/dev/null || echo missing)

@@ -17,7 +17,7 @@ The base image for the container is the [official Pi-Hole container](https://hub
 - **Automated Builds**: The Docker image is automatically built and published using [GitHub Actions](https://docs.github.com/en/actions) and [Renovate](https://docs.renovatebot.com/), ensuring you always have access to the latest version.
 - **Unbound integration**: The Unbound DNS resolver is directly integrated and configured within this image. No need for setting up and linking a separate Unbound container.
 - **Multi-Registry Publishing**: Images are published to both [Docker Hub](https://hub.docker.com/repository/docker/mpgirro/pihole-unbound) and [GitHub Container Registry (GHCR)](https://github.com/mpgirro/docker-pihole-unbound/pkgs/container/docker-pihole-unbound), giving you flexibility in where you pull your images from.
-- **Consistent Tagging**: Images are tagged with the same version tags as the [official Pi-hole images](https://github.com/pi-hole/docker-pi-hole).
+- **Consistent Tagging**: Images are tagged with the same version tags as the [official Pi-hole images](https://github.com/pi-hole/docker-pi-hole), plus an exact tag per build (see [Unbound Version](#unbound-version)).
 
 ## Usage
 
@@ -29,6 +29,16 @@ The [example Docker Compose file](example/compose.yaml) demonstrates how this im
 
 - [Docker Hub](https://hub.docker.com/repository/docker/mpgirro/pihole-unbound): `docker pull mpgirro/pihole-unbound`
 - [GitHub Container Registry](https://github.com/mpgirro/docker-pihole-unbound/pkgs/container/docker-pihole-unbound): `docker pull ghcr.io/mpgirro/docker-pihole-unbound`
+
+### Unbound Version
+
+Unbound comes from the Alpine package of the Pi-hole base image. Alpine backports security fixes without changing the upstream version, so `1.25.2-r2` can be patched while `1.25.2-r1` is not; check the package revision, not the upstream release number.
+
+A weekly rebuild picks up new Unbound packages without waiting for a Pi-hole release. It overwrites `latest` and the Pi-hole version tag (e.g. `2026.09.0`), and adds an exact tag such as `2026.09.0-unbound1.25.2-r2` that never changes. To update, pull the image again:
+
+```shell
+docker compose pull && docker compose up -d
+```
 
 ### Configuration Options
 
