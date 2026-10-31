@@ -250,7 +250,7 @@ jobs:
           \`\`\`
           EOF
 
-      - uses: softprops/action-gh-release@v3.0.0
+      - uses: softprops/action-gh-release@v3.0.3
         with:
           tag_name: ${{ needs.resolve.outputs.exact-tag }}
           target_commitish: ${{ github.sha }}
