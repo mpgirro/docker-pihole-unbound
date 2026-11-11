@@ -1,4 +1,4 @@
-FROM pihole/pihole:2026.10.1
+FROM pihole/pihole:2026.11.0
 # Set by CI to the current Alpine package version so a changed Unbound misses the layer cache
 ARG UNBOUND_VERSION
 RUN apk update && apk add "unbound${UNBOUND_VERSION:+=$UNBOUND_VERSION}"
